@@ -3,65 +3,119 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>MapNG BeamNG Viewer</title>
+  <title>MapNG BeamNG 3D Viewer</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.127/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
   <style>
     html,body,#map{width:100%;height:100%;margin:0;overflow:hidden;background:#08131f;font-family:Inter,Segoe UI,Arial,sans-serif}
-    .panel{position:absolute;z-index:10;top:14px;left:14px;width:360px;padding:14px;border-radius:12px;background:rgba(14,23,34,.95);color:#edf5ff;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 32px rgba(0,0,0,.4)}
-    h1{font-size:18px;margin:0 0 4px}.sub{font-size:12px;color:#a9b8cb;margin-bottom:12px}.drop{display:block;border:1px dashed #ff7a21;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#122235}.drop.drag{background:#18314b}.drop input{display:none}.row{display:flex;gap:8px;margin-top:10px}.row button{flex:1;background:#26384e;color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px;cursor:pointer}.status{font-size:12px;line-height:1.45;margin-top:10px;color:#c7d5e8}.error{color:#ff9b9b}
+    .panel{position:absolute;z-index:10;top:14px;left:14px;width:370px;max-height:calc(100vh - 28px);overflow:auto;padding:14px;border-radius:12px;background:rgba(14,23,34,.95);color:#edf5ff;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 32px rgba(0,0,0,.4)}
+    h1{font-size:18px;margin:0 0 4px}.sub{font-size:12px;color:#a9b8cb;margin-bottom:12px}.drop{display:block;border:1px dashed #ff7a21;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#122235}.drop.drag{background:#18314b}.drop input{display:none}
+    .row{display:flex;gap:8px;margin-top:10px}.row button{flex:1;background:#26384e;color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px;cursor:pointer}.row button.active{background:#c85d19;border-color:#ff9b5e}.row button:disabled{opacity:.45;cursor:not-allowed}
+    .group{margin-top:12px;padding-top:11px;border-top:1px solid rgba(255,255,255,.12)}.group-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#91a4ba;margin-bottom:7px}.control{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:7px 0;font-size:13px}.control input[type=range]{width:165px}.control select{background:#17283b;color:#fff;border:1px solid rgba(255,255,255,.17);border-radius:7px;padding:5px 7px}.control input[type=checkbox]{width:16px;height:16px}
+    .status{font-size:12px;line-height:1.5;margin-top:10px;color:#c7d5e8}.error{color:#ff9b9b}.hint{font-size:11px;line-height:1.45;color:#8fa2b8;margin-top:9px}.value{min-width:35px;text-align:right;color:#ffb27f;font-variant-numeric:tabular-nums}
   </style>
 </head>
 <body>
 <div id="map"></div>
 <div class="panel">
-  <h1>MapNG BeamNG Viewer</h1>
-  <div class="sub">Online Cesium preview bez inštalácie</div>
+  <h1>MapNG BeamNG 3D Viewer</h1>
+  <div class="sub">Interaktívny 3D terén v Cesium</div>
   <label class="drop" id="drop">Pretiahni sem MapNG preview ZIP<br><small>scene.json + terrain_*.bin + terrain.png</small><input id="file" type="file" accept=".zip" /></label>
-  <div class="row"><button id="home">Celá mapa</button><button id="top">Pohľad zhora</button></div>
-  <div id="status" class="status">Čakám na preview ZIP.</div>
+  <div class="row"><button id="view3d" disabled>3D pohľad</button><button id="top" disabled>Pohľad zhora</button><button id="orbit" disabled>Automatická rotácia</button></div>
+  <div class="group">
+    <div class="group-title">3D terén</div>
+    <label class="control"><span>Zobraziť terén</span><input id="terrainVisible" type="checkbox" checked disabled /></label>
+    <label class="control"><span>Zobraziť textúru</span><input id="textureVisible" type="checkbox" checked disabled /></label>
+    <label class="control"><span>Zobraziť cesty</span><input id="roadsVisible" type="checkbox" checked disabled /></label>
+    <label class="control"><span>Výškové zvýraznenie</span><span><input id="exaggeration" type="range" min="1" max="5" step="0.25" value="1" disabled /><span id="exaggerationValue" class="value">1.00×</span></span></label>
+    <label class="control"><span>Priehľadnosť terénu</span><span><input id="opacity" type="range" min="0.25" max="1" step="0.05" value="1" disabled /><span id="opacityValue" class="value">100%</span></span></label>
+  </div>
+  <div id="status" class="status">Čakám na MapNG preview ZIP.</div>
+  <div class="hint">Ovládanie: ľavé tlačidlo otáča pohľad, koliesko približuje a pravé tlačidlo posúva kameru. Zvýraznenie mení iba vizualizáciu, nie údaje mapy.</div>
 </div>
 <script type="module">
-const status=document.querySelector('#status');
-const drop=document.querySelector('#drop');
-const input=document.querySelector('#file');
-let viewer,terrainPrimitive,roads=[],meta;
+const $=s=>document.querySelector(s);
+const status=$('#status'),drop=$('#drop'),input=$('#file');
+const controls=['view3d','top','orbit','terrainVisible','textureVisible','roadsVisible','exaggeration','opacity'].map(id=>$('#'+id));
+let viewer,terrainPrimitive,roads=[],meta,sourceGeographic,sourceSt,sourceIndices,textureUrl,orbitTimer=null;
 function fail(e){console.error(e);status.className='status error';status.textContent='Chyba: '+e.message}
+function setEnabled(enabled){controls.forEach(c=>c.disabled=!enabled)}
 function ensureViewer(){
   if(viewer)return viewer;
-  viewer=new Cesium.Viewer('map',{baseLayer:new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({url:'https://tile.openstreetmap.org/'})),terrainProvider:new Cesium.EllipsoidTerrainProvider(),animation:false,timeline:false,geocoder:false,homeButton:false,baseLayerPicker:false});
+  viewer=new Cesium.Viewer('map',{baseLayer:new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({url:'https://tile.openstreetmap.org/'})),terrainProvider:new Cesium.EllipsoidTerrainProvider(),animation:false,timeline:false,geocoder:false,homeButton:false,baseLayerPicker:false,sceneModePicker:false,navigationHelpButton:true,fullscreenButton:false});
   viewer.scene.globe.depthTestAgainstTerrain=true;
+  viewer.scene.fxaa=true;
+  viewer.scene.screenSpaceCameraController.minimumZoomDistance=25;
   return viewer;
 }
-function fly(top=false){if(!viewer||!meta)return;viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(meta.center[0],meta.center[1],top?4300:meta.maxElevation+1900),orientation:{heading:top?0:Cesium.Math.toRadians(25),pitch:Cesium.Math.toRadians(top?-90:-38),roll:0},duration:1.1})}
-async function loadZip(file){
-  status.className='status';status.textContent='Načítavam '+file.name+'…';
-  const zip=await JSZip.loadAsync(file);
-  const find=(name)=>Object.values(zip.files).find(f=>!f.dir&&f.name.endsWith(name));
-  const sceneFile=find('assets/scene.json')||find('scene.json');
-  const geoFile=find('terrain_lon_lat_height.bin');
-  const stFile=find('terrain_st.bin');
-  const indexFile=find('terrain_indices.bin');
-  const textureFile=find('terrain.png');
-  if(!sceneFile||!geoFile||!stFile||!indexFile||!textureFile)throw new Error('ZIP nemá požadovaný MapNG V4 preview formát.');
-  const scene=JSON.parse(await sceneFile.async('text'));meta=scene.meta;
-  const [geoBuf,stBuf,indexBuf,textureBlob]=await Promise.all([geoFile.async('arraybuffer'),stFile.async('arraybuffer'),indexFile.async('arraybuffer'),textureFile.async('blob')]);
-  const geographic=new Float64Array(geoBuf),st=new Float32Array(stBuf),indices=new Uint32Array(indexBuf),ecef=new Float64Array(geographic.length);
-  for(let i=0;i<geographic.length/3;i++){const p=Cesium.Cartesian3.fromDegrees(geographic[i*3],geographic[i*3+1],geographic[i*3+2]);ecef[i*3]=p.x;ecef[i*3+1]=p.y;ecef[i*3+2]=p.z}
-  ensureViewer();
-  if(terrainPrimitive)viewer.scene.primitives.remove(terrainPrimitive);roads.forEach(e=>viewer.entities.remove(e));roads=[];
-  const geometry=new Cesium.Geometry({attributes:{position:new Cesium.GeometryAttribute({componentDatatype:Cesium.ComponentDatatype.DOUBLE,componentsPerAttribute:3,values:ecef}),st:new Cesium.GeometryAttribute({componentDatatype:Cesium.ComponentDatatype.FLOAT,componentsPerAttribute:2,values:st})},indices,primitiveType:Cesium.PrimitiveType.TRIANGLES,boundingSphere:Cesium.BoundingSphere.fromVertices(ecef)});
-  const textureUrl=URL.createObjectURL(textureBlob);
-  terrainPrimitive=viewer.scene.primitives.add(new Cesium.Primitive({geometryInstances:new Cesium.GeometryInstance({geometry}),appearance:new Cesium.MaterialAppearance({material:Cesium.Material.fromType('Image',{image:textureUrl,repeat:new Cesium.Cartesian2(1,1)}),translucent:false,faceForward:true}),asynchronous:false}));
-  for(const road of scene.roads||[]){const e=viewer.entities.add({name:road.name||'BeamNG road',polyline:{positions:road.coordinates.map(c=>Cesium.Cartesian3.fromDegrees(c[0],c[1],c[2]+.45)),width:Math.max(2,road.width||4),material:new Cesium.PolylineGlowMaterialProperty({glowPower:.12,color:Cesium.Color.fromCssColorString('#ffd34e')}),clampToGround:false}});roads.push(e)}
-  status.innerHTML=`<b>${file.name}</b><br>${meta.worldSize} × ${meta.worldSize} m · ${roads.length} ciest<br>Terrain: WGS84 → ECEF`;
-  fly(false);
+function cameraTo3d(top=false){
+  if(!viewer||!meta)return;
+  const height=top?Math.max(3500,(meta.worldSize||2048)*1.9):Math.max(1300,(meta.worldSize||2048)*.95);
+  viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(meta.center[0],meta.center[1],(meta.maxElevation||0)+height),orientation:{heading:top?0:Cesium.Math.toRadians(32),pitch:Cesium.Math.toRadians(top?-90:-42),roll:0},duration:1.15});
 }
-input.onchange=()=>input.files[0]&&loadZip(input.files[0]).catch(fail);
-drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag')};drop.ondragleave=()=>drop.classList.remove('drag');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');e.dataTransfer.files[0]&&loadZip(e.dataTransfer.files[0]).catch(fail)};
-document.querySelector('#home').onclick=()=>fly(false);document.querySelector('#top').onclick=()=>fly(true);
+function stopOrbit(){if(orbitTimer){clearInterval(orbitTimer);orbitTimer=null}$('#orbit').classList.remove('active');$('#orbit').textContent='Automatická rotácia'}
+function toggleOrbit(){
+  if(orbitTimer){stopOrbit();return}
+  if(!viewer||!meta)return;
+  $('#orbit').classList.add('active');$('#orbit').textContent='Zastaviť rotáciu';
+  orbitTimer=setInterval(()=>viewer.camera.rotateRight(Cesium.Math.toRadians(.12)),30);
+}
+function makeAppearance(){
+  const useTexture=$('#textureVisible').checked;
+  const alpha=Number($('#opacity').value);
+  const material=useTexture&&textureUrl
+    ? Cesium.Material.fromType('Image',{image:textureUrl,repeat:new Cesium.Cartesian2(1,1),color:new Cesium.Color(1,1,1,alpha)})
+    : Cesium.Material.fromType('Color',{color:new Cesium.Color(.43,.55,.39,alpha)});
+  return new Cesium.MaterialAppearance({material,translucent:alpha<1,faceForward:true,flat:false,closed:false});
+}
+function rebuildTerrain(){
+  if(!viewer||!sourceGeographic)return;
+  if(terrainPrimitive)viewer.scene.primitives.remove(terrainPrimitive);
+  const exaggeration=Number($('#exaggeration').value);
+  const base=Number.isFinite(meta.minElevation)?meta.minElevation:0;
+  const ecef=new Float64Array(sourceGeographic.length);
+  for(let i=0;i<sourceGeographic.length/3;i++){
+    const lon=sourceGeographic[i*3],lat=sourceGeographic[i*3+1],h=sourceGeographic[i*3+2];
+    const visualHeight=base+(h-base)*exaggeration;
+    const p=Cesium.Cartesian3.fromDegrees(lon,lat,visualHeight);
+    ecef[i*3]=p.x;ecef[i*3+1]=p.y;ecef[i*3+2]=p.z;
+  }
+  let geometry=new Cesium.Geometry({attributes:{position:new Cesium.GeometryAttribute({componentDatatype:Cesium.ComponentDatatype.DOUBLE,componentsPerAttribute:3,values:ecef}),st:new Cesium.GeometryAttribute({componentDatatype:Cesium.ComponentDatatype.FLOAT,componentsPerAttribute:2,values:sourceSt})},indices:sourceIndices,primitiveType:Cesium.PrimitiveType.TRIANGLES,boundingSphere:Cesium.BoundingSphere.fromVertices(ecef)});
+  try{geometry=Cesium.GeometryPipeline.computeNormal(geometry)}catch(error){console.warn('Normal calculation skipped',error)}
+  terrainPrimitive=viewer.scene.primitives.add(new Cesium.Primitive({geometryInstances:new Cesium.GeometryInstance({geometry}),appearance:makeAppearance(),asynchronous:false,show:$('#terrainVisible').checked}));
+  viewer.scene.requestRender();
+}
+function updateRoadVisibility(){roads.forEach(e=>e.show=$('#roadsVisible').checked)}
+async function loadZip(file){
+  stopOrbit();status.className='status';status.textContent='Načítavam '+file.name+'…';
+  const zip=await JSZip.loadAsync(file);
+  const find=name=>Object.values(zip.files).find(f=>!f.dir&&f.name.endsWith(name));
+  const sceneFile=find('assets/scene.json')||find('scene.json'),geoFile=find('terrain_lon_lat_height.bin'),stFile=find('terrain_st.bin'),indexFile=find('terrain_indices.bin'),textureFile=find('terrain.png');
+  if(!sceneFile||!geoFile||!stFile||!indexFile||!textureFile)throw new Error('ZIP nemá požadovaný MapNG V4 preview formát.');
+  const scene=JSON.parse(await sceneFile.async('text'));meta=scene.meta||{};
+  const [geoBuf,stBuf,indexBuf,textureBlob]=await Promise.all([geoFile.async('arraybuffer'),stFile.async('arraybuffer'),indexFile.async('arraybuffer'),textureFile.async('blob')]);
+  sourceGeographic=new Float64Array(geoBuf);sourceSt=new Float32Array(stBuf);sourceIndices=new Uint32Array(indexBuf);
+  if(textureUrl)URL.revokeObjectURL(textureUrl);textureUrl=URL.createObjectURL(textureBlob);
+  ensureViewer();
+  roads.forEach(e=>viewer.entities.remove(e));roads=[];
+  for(const road of scene.roads||[]){roads.push(viewer.entities.add({name:road.name||'BeamNG road',show:true,polyline:{positions:road.coordinates.map(c=>Cesium.Cartesian3.fromDegrees(c[0],c[1],c[2]+.7)),width:Math.max(2,road.width||4),material:new Cesium.PolylineGlowMaterialProperty({glowPower:.12,color:Cesium.Color.fromCssColorString('#ffd34e')}),clampToGround:false}}))}
+  $('#exaggeration').value='1';$('#opacity').value='1';$('#terrainVisible').checked=true;$('#textureVisible').checked=true;$('#roadsVisible').checked=true;
+  $('#exaggerationValue').textContent='1.00×';$('#opacityValue').textContent='100%';
+  rebuildTerrain();setEnabled(true);
+  const vertices=sourceGeographic.length/3;
+  status.innerHTML=`<b>${file.name}</b><br>${meta.worldSize||'?'} × ${meta.worldSize||'?'} m · ${roads.length} ciest<br>${vertices.toLocaleString('sk-SK')} vrcholov · skutočný 3D reliéf`;
+  cameraTo3d(false);
+}
+input.addEventListener('change',()=>input.files[0]&&loadZip(input.files[0]).catch(fail));
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag')});drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');e.dataTransfer.files[0]&&loadZip(e.dataTransfer.files[0]).catch(fail)});
+$('#view3d').addEventListener('click',()=>cameraTo3d(false));$('#top').addEventListener('click',()=>cameraTo3d(true));$('#orbit').addEventListener('click',toggleOrbit);
+$('#terrainVisible').addEventListener('change',()=>{if(terrainPrimitive)terrainPrimitive.show=$('#terrainVisible').checked});
+$('#roadsVisible').addEventListener('change',updateRoadVisibility);
+$('#textureVisible').addEventListener('change',rebuildTerrain);
+$('#exaggeration').addEventListener('input',()=>{$('#exaggerationValue').textContent=Number($('#exaggeration').value).toFixed(2)+'×'});$('#exaggeration').addEventListener('change',rebuildTerrain);
+$('#opacity').addEventListener('input',()=>{$('#opacityValue').textContent=Math.round(Number($('#opacity').value)*100)+'%'});$('#opacity').addEventListener('change',rebuildTerrain);
 </script>
 </body>
 </html>
