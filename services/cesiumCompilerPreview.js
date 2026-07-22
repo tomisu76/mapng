@@ -2,7 +2,7 @@ const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8000';
 const JOB_ID_PATTERN = /^job_[a-f0-9]{12}$/i;
 
 export const getCompilerBridgeUrl = () => String(
-  import.meta.env.VITE_GEOCRASH_BRIDGE_URL || DEFAULT_BRIDGE_URL,
+  import.meta.env?.VITE_GEOCRASH_BRIDGE_URL || DEFAULT_BRIDGE_URL,
 ).replace(/\/+$/, '');
 
 export const normalizeCompilerJobId = (value) => {
@@ -34,6 +34,48 @@ export const fetchCompilerPreview = async (jobId, { signal } = {}) => {
     throw error;
   }
   return validateCompilerPreview(await response.json());
+};
+
+const getAttachmentFilename = (contentDisposition, fallback) => {
+  const value = String(contentDisposition || '');
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return fallback;
+    }
+  }
+  return value.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
+};
+
+export const fetchCompilerArtifact = async (jobId, { signal } = {}) => {
+  const normalizedJobId = normalizeCompilerJobId(jobId);
+  if (!normalizedJobId) throw new Error('COMPILER_JOB_ID_INVALID');
+
+  const response = await fetch(
+    `${getCompilerBridgeUrl()}/api/v1/map-compile/${encodeURIComponent(normalizedJobId)}/artifact`,
+    { signal, headers: { Accept: 'application/zip' } },
+  );
+  if (!response.ok) {
+    const error = new Error(
+      response.status === 409
+        ? 'COMPILER_ARTIFACT_NOT_READY'
+        : 'COMPILER_ARTIFACT_FETCH_FAILED',
+    );
+    error.status = response.status;
+    throw error;
+  }
+
+  const blob = await response.blob();
+  if (!blob.size) throw new Error('COMPILER_ARTIFACT_EMPTY');
+  return {
+    blob,
+    filename: getAttachmentFilename(
+      response.headers.get('content-disposition'),
+      `${normalizedJobId}.zip`,
+    ),
+  };
 };
 
 export const countCompilerPreviewSurfaces = (preview) => ({

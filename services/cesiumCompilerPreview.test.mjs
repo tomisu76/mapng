@@ -5,12 +5,44 @@ import {
   buildCompilerTerrainTriangleIndices,
   applyTerrainHeightsToCompilerPreview,
   countCompilerPreviewSurfaces,
+  fetchCompilerArtifact,
   getCompilerPreviewTerrainSamplePoints,
   getCompilerTerrainGrid,
   normalizeCompilerJobId,
   offsetCompilerPreviewHeights,
   validateCompilerPreview,
 } from './cesiumCompilerPreview.js';
+
+test('downloads a verified compiler artifact with its server filename', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Blob(['zip-bytes']), {
+    status: 200,
+    headers: {
+      'content-type': 'application/zip',
+      'content-disposition': 'attachment; filename="geocrash_map.zip"',
+    },
+  });
+  try {
+    const result = await fetchCompilerArtifact('job_abcdef123456');
+    assert.equal(result.filename, 'geocrash_map.zip');
+    assert.equal(result.blob.size, 9);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('reports a compiler artifact that is not ready', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 409 });
+  try {
+    await assert.rejects(
+      fetchCompilerArtifact('job_abcdef123456'),
+      /COMPILER_ARTIFACT_NOT_READY/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test('normalizes only safe compiler job identifiers', () => {
   assert.equal(normalizeCompilerJobId(' job_abcdef123456 '), 'job_abcdef123456');

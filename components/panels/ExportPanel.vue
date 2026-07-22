@@ -79,9 +79,16 @@
               <option v-if="hasOsmData" value="architect">{{ t('exportPanel.roadTypeArchitect') }}</option>
               <option v-if="hasOsmData" value="mesh">{{ t('exportPanel.roadTypeMesh') }}</option>
               <option v-if="hasOsmData" value="decal">{{ t('exportPanel.roadTypeSpline') }}</option>
+              <option v-if="hasOsmData" value="compiler" :disabled="!hasCompilerArtifact">{{ t('exportPanel.roadTypeCompiler') }}</option>
               <option value="none">{{ t('exportPanel.roadTypeNone') }}</option>
             </select>
           </div>
+          <p v-if="beamNGRoadType === 'compiler' && !hasCompilerArtifact" class="px-0.5 text-[9px] text-amber-600 dark:text-amber-400">
+            {{ t('exportPanel.compilerRoadsPending') }}
+          </p>
+          <p v-else-if="beamNGRoadType === 'compiler'" class="px-0.5 text-[9px] text-emerald-600 dark:text-emerald-400">
+            {{ t('exportPanel.compilerRoadsReady') }}
+          </p>
 
           <div class="flex items-center justify-between gap-2 px-0.5">
             <span class="text-[10px] text-gray-500 dark:text-gray-400 shrink-0">{{ t('exportPanel.flavor') }}</span>
@@ -160,14 +167,16 @@
             </p>
           </div>
 
-          <div v-if="beamNGFlavorRequired && !beamNGFlavorId" class="px-0.5 text-[9px] text-amber-600 dark:text-amber-400">
+          <div v-if="beamNGRoadType !== 'compiler' && beamNGFlavorRequired && !beamNGFlavorId" class="px-0.5 text-[9px] text-amber-600 dark:text-amber-400">
             {{ t('exportPanel.chooseFlavor') }}
           </div>
 
           <!-- Export button -->
           <button
             @click="handleBeamNGLevelExport"
-            :disabled="isAnyExporting || (beamNGFlavorRequired && !beamNGFlavorId)"
+            :disabled="isAnyExporting
+              || (beamNGRoadType === 'compiler' && !hasCompilerArtifact)
+              || (beamNGRoadType !== 'compiler' && beamNGFlavorRequired && !beamNGFlavorId)"
             class="relative w-full flex items-center gap-3 p-3 bg-[#FF6600] hover:bg-[#e85d00] border border-[#d65500] rounded text-white transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div class="flex items-center justify-center w-8 h-8 shrink-0">
@@ -495,6 +504,7 @@ import { exportGeoTiff } from '../../services/exportGeoTiff';
 import { buildCommonTraceMetadata, downloadJsonFile } from '../../services/traceability';
 import { createWGS84ToLocal } from '../../services/geoUtils';
 import { exportBeamNGLevel } from '../../services/exportBeamNGLevel';
+import { fetchCompilerArtifact, normalizeCompilerJobId } from '../../services/cesiumCompilerPreview.js';
 import { prepareCroppedTerrainData } from '../../services/cropTerrain';
 import { getBeamNGFlavorOptions } from '../../services/beamngFlavorCatalog.js';
 import { reverseLocationName } from '../../services/nominatim';
@@ -567,6 +577,8 @@ const beamNGSuggestedLevelName = ref('');
 const beamNGLevelNameTouched = ref(false);
 let beamNGLevelNameRequestId = 0;
 const hasOsmData = computed(() => Array.isArray(props.terrainData?.osmFeatures) && props.terrainData.osmFeatures.length > 0);
+const compilerArtifactJobId = computed(() => normalizeCompilerJobId(props.terrainData?.compilerJobId));
+const hasCompilerArtifact = computed(() => Boolean(compilerArtifactJobId.value));
 const isCustomUploadTerrain = computed(() => !!props.terrainData?.elevationUnitApplied);
 const beamNGFlavorRequired = computed(() => hasOsmData.value);
 const canUseGpxzBackdrop = computed(() => props.elevationSource === 'gpxz' && !!props.gpxzApiKey);
@@ -1200,7 +1212,7 @@ const handleBeamNGLevelExport = async () => {
     console.warn(`${BEAMNG_EXPORT_UI_LOG} Aborting: missing terrainData.`);
     return;
   }
-  if (beamNGFlavorRequired.value && !beamNGFlavorId.value) {
+  if (beamNGRoadType.value !== 'compiler' && beamNGFlavorRequired.value && !beamNGFlavorId.value) {
     console.warn(`${BEAMNG_EXPORT_UI_LOG} Aborting: flavor is required but missing.`);
     return;
   }
@@ -1239,6 +1251,22 @@ const handleBeamNGLevelExport = async () => {
   try {
     console.log(`${BEAMNG_EXPORT_UI_LOG} Starting export pipeline...`);
     await yieldToUi();
+
+    if (beamNGRoadType.value === 'compiler') {
+      beamNGProgressStep.value = t('exportPanel.compilerRoadsDownloading');
+      beamNGProgressPct.value = 35;
+      const { blob, filename } = await fetchCompilerArtifact(compilerArtifactJobId.value);
+      beamNGProgressPct.value = 100;
+      beamNGPendingDownloadUrl.value = URL.createObjectURL(blob);
+      beamNGPendingDownloadName.value = filename;
+      console.log(`${BEAMNG_EXPORT_UI_LOG} Verified compiler artifact staged for download.`, {
+        jobId: compilerArtifactJobId.value,
+        filename,
+        blobSize: blob.size,
+      });
+      return;
+    }
+
     const td = await getExportTerrainData();
     console.log(`${BEAMNG_EXPORT_UI_LOG} Export terrain prepared:`, {
       width: td?.width,
